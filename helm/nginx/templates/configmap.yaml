@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: quotes-nginx
+  labels:
+    app: quotes-nginx
+    {{- include "common.labels" . | nindent 4 }}
+data:
+  nginx.conf: |
+    {{- tpl (.Files.Get "files/nginx.conf") . | nindent 4 }}

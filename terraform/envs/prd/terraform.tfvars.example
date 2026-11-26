@@ -1,0 +1,12 @@
+project_id           = "proyect-kambista-challenge"
+region               = "us-central1"
+github_repository_id = "<gh api repos/OWNER/REPO --jq .id>"
+github_owner_id      = "<gh api repos/OWNER/REPO --jq .owner.id>"
+alert_email          = "<email>"
+
+authorized_networks = [
+  { cidr_block = "<tu-ip>/32", display_name = "local" },
+]
+
+enable_cloud_armor = false
+allowed_countries  = []

@@ -1,0 +1,22 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: quotes-nginx
+  labels:
+    app: quotes-nginx
+    {{- include "common.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: quotes-nginx
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        {{- range .Values.networkPolicy.lbSourceRanges }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+      ports:
+        - port: 8080
+{{- end }}

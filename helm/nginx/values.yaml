@@ -1,0 +1,35 @@
+image:
+  repository: nginxinc/nginx-unprivileged
+  tag: "1.30-alpine@sha256:f5116ed4606f3eb015dd4a8e28cb9b351476dc0ad4bc6e9f93b19cec130cdf03"
+  pullPolicy: IfNotPresent
+
+replicas: 2
+upstream: quotes-api:80
+
+rateLimit:
+  enabled: true
+  requestsPerSecond: 10
+  burst: 20
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 100m
+    memory: 128Mi
+
+pdb:
+  minAvailable: 1
+
+ingress:
+  host: 136.82.17.30.nip.io
+  staticIpName: quotes-ingress-ip
+  securityPolicy: ""
+  sslPolicy: quotes-ssl-policy
+
+networkPolicy:
+  enabled: true
+  lbSourceRanges:
+    - 35.191.0.0/16
+    - 130.211.0.0/22

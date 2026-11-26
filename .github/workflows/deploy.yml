@@ -1,0 +1,152 @@
+name: deploy
+
+on:
+  push:
+    branches:
+      - main
+      - "feature/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-prd
+  cancel-in-progress: false
+
+env:
+  PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  REGION: ${{ vars.GCP_REGION }}
+  CLUSTER: ${{ vars.GKE_CLUSTER }}
+  NAMESPACE: quotes
+  IMAGE: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/quotes/quotes-api
+  IMAGE_TAG: sha-${{ github.sha }}
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.api == 'true' }}
+      mongodb: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.mongodb == 'true' }}
+      nginx: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.nginx == 'true' }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: filter
+        if: github.event_name == 'push'
+        uses: dorny/paths-filter@v4
+        with:
+          filters: |
+            api:
+              - "app/**"
+              - "helm/quotes-api/**"
+            mongodb:
+              - "helm/mongodb/**"
+            nginx:
+              - "helm/nginx/**"
+
+  build:
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOYER_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v3
+
+      - run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: app
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ env.IMAGE_TAG }}
+            ${{ env.IMAGE }}:latest
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: [changes, build]
+    if: >-
+      always() &&
+      needs.changes.result == 'success' &&
+      (needs.build.result == 'success' || needs.build.result == 'skipped') &&
+      (needs.changes.outputs.api == 'true' || needs.changes.outputs.mongodb == 'true' || needs.changes.outputs.nginx == 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOYER_SA }}
+
+      - uses: google-github-actions/get-gke-credentials@v3
+        with:
+          cluster_name: ${{ env.CLUSTER }}
+          location: ${{ env.REGION }}
+          project_id: ${{ env.PROJECT_ID }}
+          use_dns_based_endpoint: true
+
+      - uses: azure/setup-helm@v5
+
+      - name: mongodb
+        if: needs.changes.outputs.mongodb == 'true'
+        run: |
+          helm upgrade --install mongodb helm/mongodb \
+            --namespace "$NAMESPACE" --create-namespace \
+            --wait --timeout 10m
+          kubectl rollout status statefulset/mongodb -n "$NAMESPACE" --timeout=5m
+
+      - name: quotes-api
+        if: needs.changes.outputs.api == 'true'
+        run: |
+          helm upgrade --install quotes-api helm/quotes-api \
+            --namespace "$NAMESPACE" --create-namespace \
+            --set image.tag="$IMAGE_TAG" \
+            --wait --atomic --timeout 10m
+          kubectl rollout status deployment/quotes-api -n "$NAMESPACE" --timeout=5m
+
+      - name: nginx
+        if: needs.changes.outputs.nginx == 'true'
+        run: |
+          helm upgrade --install nginx helm/nginx \
+            --namespace "$NAMESPACE" --create-namespace \
+            --wait --atomic --timeout 10m
+          kubectl rollout status deployment/quotes-nginx -n "$NAMESPACE" --timeout=5m
+
+      - run: kubectl get pods,svc,ingress,hpa -n "$NAMESPACE"
+
+  smoke-test:
+    needs: deploy
+    if: needs.deploy.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - run: echo "BASE_URL=https://$(yq '.ingress.host' helm/nginx/values.yaml)" >> "$GITHUB_ENV"
+
+      - name: GET /health
+        run: curl -fsS --retry 12 --retry-delay 10 --retry-all-errors "$BASE_URL/health"
+
+      - name: POST /quotes
+        run: |
+          curl -fsS -X POST "$BASE_URL/quotes" \
+            -H 'content-type: application/json' \
+            -d "{\"pair\":\"USD/PEN\",\"buy\":3.70,\"sell\":3.75,\"source\":\"smoke-${GITHUB_SHA::7}\"}"
+
+      - name: GET /quotes
+        run: |
+          curl -fsS "$BASE_URL/quotes?pair=USD/PEN&limit=5" | tee quotes.json
+          grep -q "smoke-${GITHUB_SHA::7}" quotes.json

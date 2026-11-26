@@ -1,0 +1,23 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: quotes-api
+  labels:
+    app: quotes-api
+    {{- include "common.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: quotes-api
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        {{- range .Values.networkPolicy.allowedClients }}
+        - podSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+        {{- end }}
+      ports:
+        - port: {{ .Values.port }}
+{{- end }}

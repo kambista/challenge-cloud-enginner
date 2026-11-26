@@ -1,0 +1,52 @@
+image:
+  repository: mongo
+  tag: "7.0@sha256:41e8195b2791692695e1dc9bd21cd51d0a3af05fff8ace9304a5c1acf94f1ae1"
+  pullPolicy: IfNotPresent
+
+database: quotes
+appUsername: quotes-api
+wiredTigerCacheSizeGB: 0.4
+
+persistence:
+  storageClass: standard-rwo
+  size: 10Gi
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: 500m
+    memory: 1Gi
+
+indexes:
+  enabled: true
+  collection: quotes
+  specs:
+    - '{ pair: 1, createdAt: -1 }'
+
+externalSecret:
+  storeName: gcp-secret-manager
+  refreshInterval: 1h
+  rootPasswordKey: mongo-root-password
+  appPasswordKey: mongo-app-password
+
+backup:
+  enabled: true
+  bucket: proyect-kambista-challenge-mongo-backups
+  schedule: "0 6 * * *"
+  uploaderImage: "curlimages/curl:8.23.0@sha256:3fb7e13e5d179a845c97d78204f3f1064d1907037f26a3ebf91710571151fd93"
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+networkPolicy:
+  enabled: true
+  allowedClients:
+    - app: quotes-api
+    - app: mongodb-backup
+    - app: mongodb-indexes

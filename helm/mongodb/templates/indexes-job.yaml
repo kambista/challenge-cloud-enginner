@@ -1,0 +1,66 @@
+{{- if .Values.indexes.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mongodb-indexes
+  labels:
+    app: mongodb-indexes
+    {{- include "common.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 6
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app: mongodb-indexes
+        {{- include "common.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: mongodb
+      restartPolicy: OnFailure
+      securityContext:
+        {{- include "common.podSecurityContext" . | nindent 8 }}
+        runAsUser: 999
+        runAsGroup: 999
+      containers:
+        - name: indexes
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -e
+              until mongosh --quiet --host mongodb -u root -p "$MONGO_ROOT_PASSWORD" --authenticationDatabase admin --eval "db.adminCommand('ping').ok" >/dev/null 2>&1; do
+                echo "esperando a mongodb..."; sleep 5
+              done
+              mongosh --quiet --host mongodb -u root -p "$MONGO_ROOT_PASSWORD" --authenticationDatabase admin --eval '
+                const coll = db.getSiblingDB("{{ .Values.database }}").getCollection("{{ .Values.indexes.collection }}");
+                {{- range .Values.indexes.specs }}
+                printjson(coll.createIndex({{ . }}));
+                {{- end }}
+              '
+          env:
+            - name: HOME
+              value: /tmp
+            - name: MONGO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mongodb
+                  key: root-password
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 100m
+              memory: 256Mi
+          securityContext:
+            {{- include "common.containerSecurityContext" . | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}

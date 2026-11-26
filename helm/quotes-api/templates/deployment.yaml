@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quotes-api
+  labels:
+    app: quotes-api
+    {{- include "common.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicas }}
+  {{- end }}
+  revisionHistoryLimit: 10
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: quotes-api
+  template:
+    metadata:
+      labels:
+        app: quotes-api
+        {{- include "common.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: quotes-api
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        {{- include "common.podSecurityContext" . | nindent 8 }}
+        runAsUser: 10001
+        runAsGroup: 10001
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: quotes-api
+      containers:
+        - name: quotes-api
+          image: "{{ required "image.repository es obligatorio" .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.port }}
+          env:
+            - name: PORT
+              value: {{ .Values.port | quote }}
+            - name: SERVICE_NAME
+              value: quotes-api
+            - name: MONGO_URI
+              valueFrom:
+                secretKeyRef:
+                  name: quotes-api
+                  key: mongo-uri
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            {{- include "common.containerSecurityContext" . | nindent 12 }}

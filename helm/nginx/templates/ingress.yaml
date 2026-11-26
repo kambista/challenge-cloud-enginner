@@ -1,0 +1,52 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: quotes
+  labels:
+    {{- include "common.labels" . | nindent 4 }}
+  annotations:
+    kubernetes.io/ingress.class: gce
+    kubernetes.io/ingress.global-static-ip-name: {{ required "ingress.staticIpName es obligatorio" .Values.ingress.staticIpName }}
+    networking.gke.io/managed-certificates: quotes
+    networking.gke.io/v1beta1.FrontendConfig: quotes
+spec:
+  defaultBackend:
+    service:
+      name: quotes-nginx
+      port:
+        number: 80
+  rules:
+    - host: {{ required "ingress.host es obligatorio" .Values.ingress.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: quotes-nginx
+                port:
+                  number: 80
+---
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: quotes
+  labels:
+    {{- include "common.labels" . | nindent 4 }}
+spec:
+  domains:
+    - {{ .Values.ingress.host }}
+---
+apiVersion: networking.gke.io/v1beta1
+kind: FrontendConfig
+metadata:
+  name: quotes
+  labels:
+    {{- include "common.labels" . | nindent 4 }}
+spec:
+  redirectToHttps:
+    enabled: true
+    responseCodeName: MOVED_PERMANENTLY_DEFAULT
+  {{- with .Values.ingress.sslPolicy }}
+  sslPolicy: {{ . }}
+  {{- end }}

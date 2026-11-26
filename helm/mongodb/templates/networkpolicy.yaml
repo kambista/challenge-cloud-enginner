@@ -1,0 +1,23 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mongodb
+  labels:
+    app: mongodb
+    {{- include "common.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: mongodb
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        {{- range .Values.networkPolicy.allowedClients }}
+        - podSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+        {{- end }}
+      ports:
+        - port: 27017
+{{- end }}

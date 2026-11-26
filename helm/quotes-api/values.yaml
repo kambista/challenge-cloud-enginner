@@ -1,0 +1,34 @@
+image:
+  repository: us-central1-docker.pkg.dev/proyect-kambista-challenge/quotes/quotes-api
+  tag: latest
+  pullPolicy: IfNotPresent
+
+replicas: 2
+port: 3000
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: 250m
+    memory: 256Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilization: 60
+
+pdb:
+  minAvailable: 1
+
+externalSecret:
+  storeName: gcp-secret-manager
+  refreshInterval: 1h
+  mongoUriKey: mongo-uri
+
+networkPolicy:
+  enabled: true
+  allowedClients:
+    - app: quotes-nginx

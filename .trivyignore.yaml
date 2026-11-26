@@ -1,0 +1,9 @@
+misconfigurations:
+  - id: KSV-0014
+    paths:
+      - "helm/mongodb/templates/statefulset.yaml"
+    statement: mongod necesita escribir fuera del PVC (lock y socket en /tmp).
+  - id: KSV-0109
+    paths:
+      - "helm/mongodb/templates/configmap.yaml"
+    statement: falso positivo; el init script lee la contraseña de una variable de entorno, no la contiene.

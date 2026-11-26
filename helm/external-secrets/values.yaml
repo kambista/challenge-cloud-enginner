@@ -1,0 +1,6 @@
+projectId: proyect-kambista-challenge
+
+storeName: gcp-secret-manager
+
+namespaces:
+  - quotes

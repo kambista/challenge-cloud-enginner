@@ -1,0 +1,80 @@
+{{- if .Values.backup.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: mongodb-backup
+  labels:
+    app: mongodb-backup
+    {{- include "common.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 1800
+      template:
+        metadata:
+          labels:
+            app: mongodb-backup
+            {{- include "common.labels" . | nindent 12 }}
+        spec:
+          serviceAccountName: mongodb-backup
+          restartPolicy: OnFailure
+          securityContext:
+            {{- include "common.podSecurityContext" . | nindent 12 }}
+            runAsUser: 999
+            runAsGroup: 999
+          initContainers:
+            - name: dump
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+              command: ["sh", "-c"]
+              args:
+                - mongodump --uri="mongodb://root:${MONGO_ROOT_PASSWORD}@mongodb:27017/?authSource=admin" --gzip --archive=/backup/dump.archive.gz
+              env:
+                - name: MONGO_ROOT_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: mongodb
+                      key: root-password
+              resources:
+                {{- toYaml .Values.backup.resources | nindent 16 }}
+              securityContext:
+                {{- include "common.containerSecurityContext" . | nindent 16 }}
+              volumeMounts:
+                - name: backup
+                  mountPath: /backup
+          containers:
+            - name: upload
+              image: {{ .Values.backup.uploaderImage }}
+              command: ["sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  TOKEN=$(curl -sf -H "Metadata-Flavor: Google" \
+                    http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token \
+                    | sed -E 's/.*"access_token":"([^"]+)".*/\1/')
+                  OBJECT="mongodb/$(date -u +%Y%m%dT%H%M%SZ).archive.gz"
+                  curl -sf -X POST \
+                    -H "Authorization: Bearer ${TOKEN}" \
+                    -H "Content-Type: application/gzip" \
+                    --data-binary @/backup/dump.archive.gz \
+                    "https://storage.googleapis.com/upload/storage/v1/b/${BUCKET}/o?uploadType=media&name=${OBJECT}"
+                  echo "uploaded gs://${BUCKET}/${OBJECT}"
+              env:
+                - name: BUCKET
+                  value: {{ required "backup.bucket es obligatorio" .Values.backup.bucket }}
+              resources:
+                {{- toYaml .Values.backup.resources | nindent 16 }}
+              securityContext:
+                {{- include "common.containerSecurityContext" . | nindent 16 }}
+              volumeMounts:
+                - name: backup
+                  mountPath: /backup
+                  readOnly: true
+          volumes:
+            - name: backup
+              emptyDir: {}
+{{- end }}

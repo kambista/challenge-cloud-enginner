@@ -1,0 +1,88 @@
+name: ci
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dir: [terraform/bootstrap, terraform/envs/prd]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+      - run: terraform fmt -check -recursive
+        working-directory: terraform
+      - run: terraform init -backend=false -input=false
+        working-directory: ${{ matrix.dir }}
+      - run: terraform validate
+        working-directory: ${{ matrix.dir }}
+
+  helm:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        chart: [external-secrets, mongodb, quotes-api, nginx]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@v5
+      - name: lint y render
+        run: |
+          helm lint helm/${{ matrix.chart }}
+          helm template ${{ matrix.chart }} helm/${{ matrix.chart }} > /dev/null
+
+  nginx:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@v5
+      - name: nginx -t
+        run: |
+          helm template nginx helm/nginx \
+            --show-only templates/configmap.yaml \
+            | yq '.data["nginx.conf"]' > nginx.conf
+          IMAGE="$(yq '.image.repository' helm/nginx/values.yaml):$(yq '.image.tag' helm/nginx/values.yaml)"
+          docker run --rm --add-host quotes-api:127.0.0.1 \
+            -v "$PWD/nginx.conf:/etc/nginx/nginx.conf:ro" \
+            "$IMAGE" nginx -t
+
+  trivy-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          skip-dirs: app
+          severity: HIGH,CRITICAL
+          trivyignores: .trivyignore.yaml
+          exit-code: "1"
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: app
+          push: false
+          load: true
+          tags: quotes-api:ci
+          cache-from: type=gha
+      # Informativo: la imagen se construye con el Dockerfile del reto.
+      - uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          image-ref: quotes-api:ci
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "0"

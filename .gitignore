@@ -7,12 +7,12 @@ npm-debug.log*
 
 # Terraform
 .terraform/
-.terraform.lock.hcl
 *.tfstate
 *.tfstate.*
 *.tfvars
 !*.tfvars.example
 crash.log
+*.tfplan
 override.tf
 override.tf.json
 *_override.tf
