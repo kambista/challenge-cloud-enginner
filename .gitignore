@@ -44,3 +44,11 @@ Thumbs.db
 EVALUACION.md
 RUBRICA*.md
 rubrica*.md
+
+# Terraform & Secrets
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfvars
+kubeconfig
+.env

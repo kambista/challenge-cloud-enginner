@@ -1,0 +1,95 @@
+﻿name: Build and Deploy quotes-api to GKE
+
+on:
+  push:
+    branches:
+      - main
+      - feature/fabricio-neyra
+    paths:
+      - "app/**"
+      - "k8s/**"
+      - "nginx/**"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+
+env:
+  PROJECT_ID: kambista-quotes-reto
+  REGION: us-central1
+  ZONE: us-central1-a
+  CLUSTER_NAME: kambista-gke-cluster
+  REPOSITORY: quotes-api
+  IMAGE_NAME: quotes-api
+  PUBLIC_HOST: 34.110.231.216.nip.io
+
+jobs:
+  build-and-deploy:
+    name: Build, Push & Deploy to GKE
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud (Workload Identity Federation)
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/983392615003/locations/global/workloadIdentityPools/github-actions-pool/providers/github-oidc-provider
+          service_account: github-actions-sa@kambista-quotes-reto.iam.gserviceaccount.com
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      - name: Build and Push Docker image
+        id: build
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          IMAGE_URI="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.IMAGE_NAME }}"
+          echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
+          echo "SHORT_SHA=$SHORT_SHA" >> $GITHUB_ENV
+
+          docker build -t "$IMAGE_URI:sha-$SHORT_SHA" -t "$IMAGE_URI:latest" ./app
+          docker push "$IMAGE_URI:sha-$SHORT_SHA"
+          docker push "$IMAGE_URI:latest"
+
+      - name: Get GKE credentials
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.CLUSTER_NAME }}
+          location: ${{ env.ZONE }}
+          project_id: ${{ env.PROJECT_ID }}
+
+      - name: Deploy quotes-api to GKE
+        run: |
+          kubectl apply -f k8s/02-quotes-api.yaml
+          kubectl set image deployment/quotes-api quotes-api="$IMAGE_URI:sha-$SHORT_SHA" -n quotes
+          kubectl rollout status deployment/quotes-api -n quotes --timeout=180s
+
+      - name: Smoke Test against Public Load Balancer
+        run: |
+          echo "Testing public endpoint via http://${{ env.PUBLIC_HOST }}..."
+          for i in $(seq 1 10); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://${{ env.PUBLIC_HOST }}/health" || true)
+            if [ "$STATUS" = "200" ]; then
+              echo "Health check OK (HTTP 200)"
+              break
+            fi
+            echo "Attempt $i: HTTP $STATUS - waiting 10s..."
+            sleep 10
+          done
+
+          curl -f -s "http://${{ env.PUBLIC_HOST }}/health"
+          echo ""
+          curl -f -s -X POST "http://${{ env.PUBLIC_HOST }}/quotes" \
+            -H "Content-Type: application/json" \
+            -d '{"pair":"USD/PEN","buy":3.74,"sell":3.77,"source":"github-actions-smoke-test"}'
+          echo ""
+          curl -f -s "http://${{ env.PUBLIC_HOST }}/quotes?pair=USD/PEN&limit=5"
+          echo ""
