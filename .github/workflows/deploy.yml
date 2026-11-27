@@ -68,7 +68,7 @@ jobs:
 
       - name: Deploy quotes-api to GKE
         run: |
-          kubectl apply -f k8s/02-quotes-api.yaml
+          kubectl apply -f k8s/
           kubectl set image deployment/quotes-api quotes-api="$IMAGE_URI:sha-$SHORT_SHA" -n quotes
           kubectl rollout status deployment/quotes-api -n quotes --timeout=180s
 
