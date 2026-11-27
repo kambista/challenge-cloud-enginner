@@ -1,0 +1,12 @@
+﻿apiVersion: v1
+kind: Namespace
+metadata:
+  name: quotes
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: quotes-api-ksa
+  namespace: quotes
+  annotations:
+    iam.gke.io/gcp-service-account: quotes-api-sa@kambista-quotes-reto.iam.gserviceaccount.com
